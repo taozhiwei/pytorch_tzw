@@ -1916,7 +1916,7 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
     # alive until all works and hooks are done. The current implementation does the
     # latter. Therefore, we explicitly call _wait_for_pending_works() here to wait
     # for the pending hooks to finish.
-    if pg.name().lower() == "nccl" and pg._has_hooks():
+    if pg._has_hooks():
         pg._wait_for_pending_works()
 
     if group is None or group == GroupMember.WORLD:
@@ -2364,15 +2364,17 @@ def batch_isend_irecv(p2p_op_list):
     """
     _check_p2p_op_list(p2p_op_list)
     group = p2p_op_list[0].group
+    if group is None:
+        group = _get_default_group()
     device = p2p_op_list[0].tensor.device
-    if device.type == "cuda":
-        # NCCL style coalescing
+    if group.supports_coalescing:
+        # backend support coalescing
         with _coalescing_manager(group, device, async_ops=True) as cm:
             for p2p_op in p2p_op_list:
                 p2p_op.op(p2p_op.tensor, p2p_op.peer, p2p_op.group, p2p_op.tag)
         return cm.works
     else:
-        # Backward support for Gloo
+        # backend not support coalescing
         reqs = []
         for p2p_op in p2p_op_list:
             work = p2p_op.op(p2p_op.tensor, p2p_op.peer, p2p_op.group, p2p_op.tag)
